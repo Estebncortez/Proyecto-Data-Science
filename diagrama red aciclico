@@ -1,0 +1,109 @@
+# Cargar las librerías necesarias
+library(readxl)
+library(tidyverse)
+library(tseries)
+library(forecast)
+library(igraph)
+
+# Cargar los datos desde el archivo Excel
+file_path <- "C:/Users/esteb/OneDrive/Escritorio/Data Science/Proyecto/Basededatos/P_Data_Extract_From_World_Development_Indicators.xlsx"
+data <- read_excel(file_path, sheet = "Data")
+
+# Variable central
+central_variable <- "Access to electricity (% of population)"
+
+# Lista de grupos de variables (incluyendo la variable central)
+groups <- list(
+  c(central_variable, "Access to electricity, urban (% of urban population)", "Access to electricity, rural (% of rural population)", "GDP (current US$)", "Electric power consumption (kWh per capita)"),
+  c(central_variable, "Electric power transmission and distribution losses (% of output)", "Electricity production from coal sources (% of total)", "Electricity production from hydroelectric sources (% of total)", "Electricity production from natural gas sources (% of total)"),
+  c(central_variable, "Electricity production from nuclear sources (% of total)", "Electricity production from oil sources (% of total)", "Electricity production from oil, gas and coal sources (% of total)", "Electricity production from renewable sources, excluding hydroelectric (% of total)"),
+  c(central_variable, "Electricity production from renewable sources, excluding hydroelectric (kWh)", "GDP growth (annual %)", "CO2 emissions from electricity and heat production, total (% of total fuel combustion)", "Investment in energy with private participation (current US$)")
+)
+
+# Función para filtrar y procesar datos de un grupo específico
+process_group_data <- function(data, group) {
+  group_data <- data %>%
+    filter(`Series Name` %in% group) %>%
+    select(-`Country Code`, -`Series Code`) %>%
+    pivot_longer(cols = starts_with("19") | starts_with("20"), names_to = "Year", values_to = "Value") %>%
+    mutate(Year = as.numeric(sub("\\[.*", "", Year)),
+           Value = suppressWarnings(as.numeric(Value)))
+  
+  # Calcular los promedios globales para cada serie de tiempo por año
+  global_data <- group_data %>%
+    group_by(Year, `Series Name`) %>%
+    summarise(Global_Value = mean(Value, na.rm = TRUE), .groups = 'drop') %>%
+    pivot_wider(names_from = `Series Name`, values_from = Global_Value) %>%
+    drop_na()
+  
+  return(global_data)
+}
+
+# Función para crear y graficar el DAG donde todos los nodos apuntan a la variable central
+create_dag <- function(global_data, group) {
+  # Verificar si hay suficientes datos para calcular correlaciones
+  if (nrow(global_data) < 2) {
+    cat("No hay suficientes datos para calcular correlaciones para el grupo.\n")
+    return(NULL)
+  }
+  
+  correlations_pearson <- global_data %>%
+    select(all_of(group)) %>%
+    cor(method = "pearson", use = "pairwise.complete.obs")
+  
+  nodes <- data.frame(name = group)
+  edges <- data.frame()
+  
+  for (i in 2:length(group)) {
+    from_variable <- group[i]
+    to_variable <- central_variable
+    weight <- correlations_pearson[from_variable, to_variable]
+    edges <- rbind(edges, data.frame(from = from_variable, to = to_variable, weight = weight))
+  }
+  
+  g <- graph_from_data_frame(edges, directed = TRUE, vertices = nodes)
+  plot(g, edge.label = round(E(g)$weight, 2), vertex.label.color = "black", vertex.color = "skyblue", main = "Diagrama de Red Acíclico (DAG)")
+}
+
+# Función para realizar pruebas y ajustar el modelo ARIMA
+perform_additional_tests <- function(global_data) {
+  # Prueba de estacionariedad (ADF Test)
+  adf_test <- adf.test(global_data$`Access to electricity (% of population)`, alternative = "stationary")
+  print(adf_test)
+  
+  # Diferenciación para hacer la serie estacionaria
+  global_data <- global_data %>%
+    mutate(Access_diff = c(NA, diff(`Access to electricity (% of population)`)))
+  
+  # Ajuste del modelo ARIMA
+  model <- auto.arima(global_data$Access_diff[-1], seasonal = FALSE, stepwise = FALSE, approximation = FALSE)
+  model_summary <- summary(model)
+  print(model_summary)
+  
+  # Residuales del modelo
+  residuals <- residuals(model)
+  
+  # Normalidad de los residuos (Prueba de Shapiro-Wilk)
+  shapiro_test <- shapiro.test(residuals)
+  print(shapiro_test)
+  
+  # Gráfico de histogramas de residuos
+  hist(residuals, breaks = 20, main = "Histogram of Residuals", xlab = "Residuals", col = "skyblue")
+  
+  # Homoscedasticidad: Gráfico de residuos vs valores ajustados
+  plot(model$fitted, residuals, main = "Residuals vs Fitted Values", xlab = "Fitted Values", ylab = "Residuals")
+  abline(h = 0, col = "red", lty = 2)
+}
+
+# Procesar y graficar cada grupo de variables y realizar pruebas adicionales
+for (i in seq_along(groups)) {
+  cat("Procesando el grupo", i, "...\n")
+  group <- groups[[i]]
+  global_data <- process_group_data(data, group)
+  if (nrow(global_data) > 0) {
+    create_dag(global_data, group)
+    perform_additional_tests(global_data)
+  } else {
+    cat("No hay datos suficientes para el grupo", i, ".\n")
+  }
+}
