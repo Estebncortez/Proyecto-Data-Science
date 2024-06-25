@@ -1,0 +1,99 @@
+# Cargar las librerías necesarias
+library(readxl)
+library(tidyverse)
+library(reshape2)  # Cargar reshape2 después de tidyverse
+library(ggplot2)
+
+# Cargar los datos desde el archivo Excel
+file_path <- "C:/Users/esteb/OneDrive/Escritorio/Data Science/Proyecto/Basededatos/P_Data_Extract_From_World_Development_Indicators.xlsx"
+data <- read_excel(file_path, sheet = "Data")
+
+# Lista de series de tiempo relevantes
+relevant_series <- c(
+  "Access to electricity, urban (% of urban population)",
+  "Access to electricity, rural (% of rural population)",
+  "Access to electricity (% of population)",
+  "GDP (current US$)",
+  "Electric power consumption (kWh per capita)",
+  "Electric power transmission and distribution losses (% of output)",
+  "Electricity production from coal sources (% of total)",
+  "Electricity production from hydroelectric sources (% of total)",
+  "Electricity production from natural gas sources (% of total)",
+  "Electricity production from nuclear sources (% of total)",
+  "Electricity production from oil sources (% of total)",
+  "Electricity production from oil, gas and coal sources (% of total)",
+  "Electricity production from renewable sources, excluding hydroelectric (% of total)",
+  "Electricity production from renewable sources, excluding hydroelectric (kWh)",
+  "GDP growth (annual %)",
+  "CO2 emissions from electricity and heat production, total (% of total fuel combustion)",
+  "Investment in energy with private participation (current US$)"
+)
+
+# Filtrar y procesar los datos para las series de tiempo relevantes
+filtered_data <- data %>%
+  filter(`Series Name` %in% relevant_series) %>%
+  select(-`Country Code`, -`Series Code`) %>%
+  pivot_longer(cols = starts_with("19") | starts_with("20"), names_to = "Year", values_to = "Value") %>%
+  mutate(Year = as.numeric(sub("\\[.*", "", Year)),
+         Value = suppressWarnings(as.numeric(Value)))
+
+# Calcular los promedios globales para cada serie de tiempo por año
+global_data <- filtered_data %>%
+  group_by(Year, `Series Name`) %>%
+  summarise(Global_Value = mean(Value, na.rm = TRUE), .groups = 'drop') %>%
+  pivot_wider(names_from = `Series Name`, values_from = Global_Value)
+
+# Asegurar que las columnas de interés no tienen NA
+global_data <- global_data %>%
+  drop_na()
+
+# Variables en grupos de 4 para calcular las correlaciones
+groups <- list(
+  c("Access to electricity, urban (% of urban population)", "Access to electricity, rural (% of rural population)", "GDP (current US$)", "Electric power consumption (kWh per capita)"),
+  c("Electric power transmission and distribution losses (% of output)", "Electricity production from coal sources (% of total)", "Electricity production from hydroelectric sources (% of total)", "Electricity production from natural gas sources (% of total)"),
+  c("Electricity production from nuclear sources (% of total)", "Electricity production from oil sources (% of total)", "Electricity production from oil, gas and coal sources (% of total)", "Electricity production from renewable sources, excluding hydroelectric (% of total)"),
+  c("Electricity production from renewable sources, excluding hydroelectric (kWh)", "GDP growth (annual %)", "CO2 emissions from electricity and heat production, total (% of total fuel combustion)", "Investment in energy with private participation (current US$)")
+)
+
+center_variable <- "Access to electricity (% of population)"
+
+# Función para crear gráficos de correlación (heatmap) y devolver resultados detallados
+create_correlation_heatmap <- function(cor_data, group_name) {
+  cor_data_melt <- melt(cor_data)
+  heatmap_plot <- ggplot(data = cor_data_melt, aes(x = Var1, y = Var2, fill = value)) +
+    geom_tile(color = "white") +
+    scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                         midpoint = 0, limit = c(-1, 1), space = "Lab", 
+                         name = "Pearson\nCorrelation") +
+    theme_minimal() + 
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                     size = 12, hjust = 1)) +
+    coord_fixed() +
+    ggtitle(paste("Correlation Heatmap for", group_name))
+  
+  # Mostrar el gráfico
+  print(heatmap_plot)
+  
+  # Devolver la matriz de correlación detallada
+  return(cor_data)
+}
+
+# Calcular y mostrar las correlaciones para cada grupo, y devolver los resultados detallados
+correlation_results <- list()
+
+for (i in seq_along(groups)) {
+  group <- groups[[i]]
+  cor_data <- global_data %>%
+    select(all_of(c(center_variable, group))) %>%
+    cor(method = "pearson", use = "pairwise.complete.obs")
+  
+  # Crear el gráfico de correlación y obtener los resultados detallados
+  detailed_results <- create_correlation_heatmap(cor_data, paste("Group", i))
+  
+  # Guardar los resultados detallados en la lista
+  correlation_results[[paste("Group", i)]] <- detailed_results
+}
+
+# Mostrar los resultados detallados
+correlation_results
+
