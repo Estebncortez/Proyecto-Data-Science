@@ -1,0 +1,80 @@
+#Análisis descriptivo por paises
+
+# Cargar las librerías necesarias
+library(readxl)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+
+# Ruta del archivo
+file_path <- "C:/Users/esteb/OneDrive/Escritorio/Data Science/Proyecto/Basededatos/BDProyecto.xlsx"
+
+# Cargar todas las hojas en una lista
+sheet_names <- c('Electricity Urban', 'Electricity Rural', 'Electricity Total', 'GDP', 
+                 'Power Consumption', 'Power Losses', 'Coal Production', 'Hydro Production', 
+                 'Gas Production', 'Nuclear Production', 'Oil Production', 
+                 'Fossil Fuels Production', 'Renewable Prod (no hydro)', 
+                 'Renewable Prod kWh (no hydro)', 'GDP Growth', 'CO2 Emissions', 
+                 'Energy Investment')
+
+datos_list <- lapply(sheet_names, function(sheet) read_excel(file_path, sheet = sheet))
+
+# Asignar nombres a la lista
+names(datos_list) <- sheet_names
+
+# Función para limpiar y transformar datos
+clean_transform_data <- function(data) {
+  data[data == ".."] <- NA
+  data <- data %>% mutate(across(everything(), as.numeric))
+  return(data)
+}
+
+# Aplicar la función de limpieza y transformación a todos los datasets
+datos_list <- lapply(datos_list, clean_transform_data)
+
+# Ajustar nombres de las columnas para evitar duplicados y problemas en el merge
+adjust_column_names <- function(data) {
+  colnames(data) <- make.names(colnames(data), unique = TRUE)
+  return(data)
+}
+
+datos_list <- lapply(datos_list, adjust_column_names)
+
+# Unir todos los datos utilizando full_join
+combined_data <- datos_list$`GDP` %>%
+  full_join(datos_list$`GDP Growth`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Electricity Total`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Electricity Urban`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Electricity Rural`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Power Consumption`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Power Losses`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Coal Production`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Hydro Production`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Gas Production`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Nuclear Production`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Oil Production`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Fossil Fuels Production`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Renewable Prod (no hydro)`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Renewable Prod kWh (no hydro)`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`CO2 Emissions`, by = c("Year" = "Year")) %>%
+  full_join(datos_list$`Energy Investment`, by = c("Year" = "Year"))
+
+# Mostrar una muestra de los datos combinados
+head(combined_data)
+
+# Estadísticas descriptivas
+summary(combined_data)
+
+# Gráfico de ejemplo: acceso a electricidad a lo largo del tiempo para un país específico
+ggplot(datos_list$`Electricity Total`, aes(x = Year, y = `Chile`)) +
+  geom_line() +
+  labs(title = "Acceso a Electricidad en Chile a lo largo del tiempo",
+       x = "Año",
+       y = "Acceso a Electricidad (%)")
+
+# Gráfico de ejemplo: PIB a lo largo del tiempo para un país específico
+ggplot(datos_list$`GDP`, aes(x = Year, y = `Chile`)) +
+  geom_line() +
+  labs(title = "PIB de Chile a lo largo del tiempo",
+       x = "Año",
+       y = "PIB (USD)")
